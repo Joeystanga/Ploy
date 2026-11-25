@@ -32,14 +32,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 class MainActivity : ComponentActivity() {
     private val libraryVm: LibraryViewModel by viewModels()
     private val playerVm: PlayerViewModel by viewModels()
+    private val settingsVm: SettingsViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
-                val player by playerVm.state.collectAsStateWithLifecycle()
-                PaletteBackdrop(player.mediaId?.toLongOrNull(), Modifier.fillMaxSize()) {
+                Surface(Modifier.fillMaxSize()) {
                     val launcher = rememberLauncherForActivityResult(
                         ActivityResultContracts.RequestMultiplePermissions()
                     ) { libraryVm.refresh() }
@@ -55,12 +55,45 @@ class MainActivity : ComponentActivity() {
 
                     val songs by libraryVm.songs.collectAsStateWithLifecycle()
                     val player by playerVm.state.collectAsStateWithLifecycle()
+                    val theme by settingsVm.theme.collectAsStateWithLifecycle()
+                    val powerSaving by settingsVm.powerSaving.collectAsStateWithLifecycle()
                     var showNowPlaying by rememberSaveable { mutableStateOf(false) }
 
                     BackHandler(enabled = showNowPlaying) { showNowPlaying = false }
 
+                    val actions = remember {
+                        NowPlayingActions(
+                            onSeek = playerVm::seekTo,
+                            onToggle = playerVm::togglePlay,
+                            onNext = playerVm::next,
+                            onPrevious = playerVm::previous,
+                            onShuffle = playerVm::toggleShuffle,
+                            onRepeat = playerVm::cycleRepeat,
+                            onClose = { showNowPlaying = false }
+                        )
+                    }
+
                     Box(Modifier.fillMaxSize()) {
                         Column(Modifier.fillMaxSize()) {
+                            // TEMPORARY theme switcher, replaced by the Settings screen later
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .statusBarsPadding()
+                                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                AssistChip(
+                                    onClick = { settingsVm.setTheme(theme.next()) },
+                                    label = { Text("Theme: ${theme.label}") }
+                                )
+                                FilterChip(
+                                    selected = powerSaving,
+                                    onClick = { settingsVm.setPowerSaving(!powerSaving) },
+                                    label = { Text("Power saving") }
+                                )
+                            }
+
                             SongList(
                                 songs = songs,
                                 modifier = Modifier.weight(1f),
@@ -78,19 +111,13 @@ class MainActivity : ComponentActivity() {
                             enter = slideInVertically { it },
                             exit = slideOutVertically { it }
                         ) {
-                            Surface(Modifier.fillMaxSize()) {
-                                NowPlayingScreen(
-                                    state = player,
-                                    positionFlow = playerVm.position,
-                                    onSeek = playerVm::seekTo,
-                                    onToggle = playerVm::togglePlay,
-                                    onNext = playerVm::next,
-                                    onPrevious = playerVm::previous,
-                                    onShuffle = playerVm::toggleShuffle,
-                                    onRepeat = playerVm::cycleRepeat,
-                                    onClose = { showNowPlaying = false }
-                                )
-                            }
+                            NowPlayingHost(
+                                theme = theme,
+                                powerSaving = powerSaving,
+                                state = player,
+                                positionFlow = playerVm.position,
+                                actions = actions
+                            )
                         }
                     }
                 }
@@ -102,14 +129,14 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun SongList(songs: List<Song>, modifier: Modifier = Modifier, onSongClick: (Int) -> Unit) {
     LazyColumn(
-        modifier = modifier.fillMaxWidth().statusBarsPadding(),
+        modifier = modifier.fillMaxWidth(),
         contentPadding = PaddingValues(vertical = 8.dp)
     ) {
         itemsIndexed(songs, key = { _, s -> s.id }) { index, song ->
             ListItem(
                 modifier = Modifier.clickable { onSongClick(index) },
-                headlineContent = { Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 leadingContent = { ArtworkImage(song.id, 128, Modifier.size(52.dp)) },
+                headlineContent = { Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 supportingContent = {
                     Text("${song.artist} · ${formatDuration(song.durationMs)}", maxLines = 1)
                 }

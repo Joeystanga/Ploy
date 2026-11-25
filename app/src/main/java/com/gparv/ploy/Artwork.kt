@@ -11,8 +11,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -20,19 +18,22 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.graphics.ColorUtils
 import androidx.palette.graphics.Palette
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -79,7 +80,7 @@ object ArtworkLoader {
                     MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, songId
                 )
                 context.contentResolver.loadThumbnail(uri, Size(sizePx, sizePx), null)
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 null   // no embedded or folder art for this track
             }
         }
@@ -142,14 +143,41 @@ fun rememberArtPalette(songId: Long?): ArtPalette {
 }
 
 @Composable
-fun PaletteBackdrop(
-    songId: Long?,
-    modifier: Modifier = Modifier,
-    content: @Composable BoxScope.() -> Unit
-) {
+fun rememberArtBitmap(songId: Long?, sizePx: Int): Bitmap? {
+    val context = LocalContext.current.applicationContext
+    val bmp by produceState<Bitmap?>(null, songId, sizePx) {
+        value = if (songId == null) null else ArtworkLoader.load(context, songId, sizePx)
+    }
+    return bmp
+}
+
+@Immutable
+data class ArtColors(val bg: Color, val accent: Color, val text: Color) {
+    val onAccent: Color get() = bg
+    val textMuted: Color get() = text.copy(alpha = 0.62f)
+    val soft: Color get() = text.copy(alpha = 0.10f)
+    val border: Color
+        get() = if (bg.luminance() > 0.5f) Color.Black.copy(alpha = 0.25f)
+        else text.copy(alpha = 0.20f)
+}
+
+@Composable
+fun rememberArtColors(songId: Long?): ArtColors {
     val p = rememberArtPalette(songId)
-    val top by animateColorAsState(lerp(p.muted, Color.Black, 0.25f), tween(900), label = "top")
-    val mid by animateColorAsState(lerp(p.dominant, Color.Black, 0.55f), tween(900), label = "mid")
-    val bottom by animateColorAsState(lerp(p.dark, Color.Black, 0.7f), tween(900), label = "bottom")
-    Box(modifier.background(Brush.verticalGradient(listOf(top, mid, bottom))), content = content)
+    val hsl = remember(p) {
+        // take whichever of dominant/muted is more colourful so a grey-ish dominant doesn't flatten the theme
+        val a = FloatArray(3)
+        val b = FloatArray(3)
+        ColorUtils.colorToHSL(p.dominant.toArgb(), a)
+        ColorUtils.colorToHSL(p.muted.toArgb(), b)
+        if (b[1] > a[1]) b else a
+    }
+    val sat = hsl[1].coerceIn(0.18f, 0.65f)
+    fun tone(s: Float, l: Float) =
+        Color(ColorUtils.HSLToColor(floatArrayOf(hsl[0], s.coerceIn(0f, 1f), l)))
+
+    val bg by animateColorAsState(tone(sat * 0.75f, 0.17f), tween(900), label = "bg")
+    val accent by animateColorAsState(tone(sat * 0.8f, 0.87f), tween(900), label = "accent")
+    val text by animateColorAsState(tone(sat * 0.5f, 0.94f), tween(900), label = "text")
+    return ArtColors(bg, accent, text)
 }
