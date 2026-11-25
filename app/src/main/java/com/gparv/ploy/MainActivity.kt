@@ -3,11 +3,15 @@ package com.gparv.ploy
 import android.Manifest
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,6 +22,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -33,7 +38,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
-                Surface(Modifier.fillMaxSize()) {
+                val player by playerVm.state.collectAsStateWithLifecycle()
+                PaletteBackdrop(player.mediaId?.toLongOrNull(), Modifier.fillMaxSize()) {
                     val launcher = rememberLauncherForActivityResult(
                         ActivityResultContracts.RequestMultiplePermissions()
                     ) { libraryVm.refresh() }
@@ -49,14 +55,43 @@ class MainActivity : ComponentActivity() {
 
                     val songs by libraryVm.songs.collectAsStateWithLifecycle()
                     val player by playerVm.state.collectAsStateWithLifecycle()
+                    var showNowPlaying by rememberSaveable { mutableStateOf(false) }
 
-                    Column(Modifier.fillMaxSize()) {
-                        SongList(
-                            songs = songs,
-                            modifier = Modifier.weight(1f),
-                            onSongClick = { index -> playerVm.playSongs(songs, index) }
-                        )
-                        MiniPlayer(player, onToggle = playerVm::togglePlay)
+                    BackHandler(enabled = showNowPlaying) { showNowPlaying = false }
+
+                    Box(Modifier.fillMaxSize()) {
+                        Column(Modifier.fillMaxSize()) {
+                            SongList(
+                                songs = songs,
+                                modifier = Modifier.weight(1f),
+                                onSongClick = { index -> playerVm.playSongs(songs, index) }
+                            )
+                            MiniPlayer(
+                                state = player,
+                                onToggle = playerVm::togglePlay,
+                                onClick = { showNowPlaying = true }
+                            )
+                        }
+
+                        AnimatedVisibility(
+                            visible = showNowPlaying,
+                            enter = slideInVertically { it },
+                            exit = slideOutVertically { it }
+                        ) {
+                            Surface(Modifier.fillMaxSize()) {
+                                NowPlayingScreen(
+                                    state = player,
+                                    positionFlow = playerVm.position,
+                                    onSeek = playerVm::seekTo,
+                                    onToggle = playerVm::togglePlay,
+                                    onNext = playerVm::next,
+                                    onPrevious = playerVm::previous,
+                                    onShuffle = playerVm::toggleShuffle,
+                                    onRepeat = playerVm::cycleRepeat,
+                                    onClose = { showNowPlaying = false }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -74,6 +109,7 @@ fun SongList(songs: List<Song>, modifier: Modifier = Modifier, onSongClick: (Int
             ListItem(
                 modifier = Modifier.clickable { onSongClick(index) },
                 headlineContent = { Text(song.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                leadingContent = { ArtworkImage(song.id, 128, Modifier.size(52.dp)) },
                 supportingContent = {
                     Text("${song.artist} · ${formatDuration(song.durationMs)}", maxLines = 1)
                 }
@@ -83,17 +119,19 @@ fun SongList(songs: List<Song>, modifier: Modifier = Modifier, onSongClick: (Int
 }
 
 @Composable
-fun MiniPlayer(state: PlayerState, onToggle: () -> Unit) {
+fun MiniPlayer(state: PlayerState, onToggle: () -> Unit, onClick: () -> Unit) {
     if (!state.hasMedia) return
     Surface(
         tonalElevation = 3.dp,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
     ) {
         Row(
             Modifier.navigationBarsPadding().padding(horizontal = 20.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            ArtworkImage(state.mediaId?.toLongOrNull(), 128, Modifier.size(44.dp), RoundedCornerShape(10.dp))
+            Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     state.title ?: "",
